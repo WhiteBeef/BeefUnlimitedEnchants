@@ -1,0 +1,5 @@
+name: BeefUnlimitedEnchants
+version: '${project.version}'
+main: ru.whitebeef.beefunlimitedenchants.BeefUnlimitedEnchants
+api-version: 1.16
+authors: [ _WhiteBeef ]
