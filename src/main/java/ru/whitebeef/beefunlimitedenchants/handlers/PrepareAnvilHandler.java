@@ -1,87 +1,154 @@
 package ru.whitebeef.beefunlimitedenchants.handlers;
 
 import net.kyori.adventure.text.Component;
-import org.bukkit.Bukkit;
 import org.bukkit.Material;
 import org.bukkit.enchantments.Enchantment;
-import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.inventory.PrepareAnvilEvent;
 import org.bukkit.inventory.AnvilInventory;
 import org.bukkit.inventory.ItemStack;
+import org.bukkit.inventory.meta.EnchantmentStorageMeta;
 import org.bukkit.inventory.meta.ItemMeta;
+import ru.whitebeef.beefunlimitedenchants.BeefUnlimitedEnchants;
+import ru.whitebeef.beefunlimitedenchants.enums.MergeType;
 
-import java.util.HashMap;
 import java.util.Map;
+import java.util.TreeSet;
 
 public class PrepareAnvilHandler implements Listener {
 
-    @EventHandler(ignoreCancelled = true)
-    public void onPrepareAnvilRecipe(PrepareAnvilEvent event) {
+    @EventHandler
+    public void onAnvilEvent(PrepareAnvilEvent event) {
         AnvilInventory inventory = event.getInventory();
-
-        if (inventory.getFirstItem() == null || inventory.getSecondItem() == null) {
+        ItemStack leftItem = inventory.getItem(0);
+        ItemStack rightItem = inventory.getItem(1);
+        if (leftItem == null || rightItem == null)
+            return;
+        ItemStack mergeResult = getMergeResult(leftItem, rightItem);
+        if (mergeResult == null) {
+            event.setResult(null);
             return;
         }
-        ItemStack firstItem = inventory.getFirstItem().clone();
-        ItemStack secondItem = inventory.getSecondItem().clone();
-        ItemStack result = inventory.getResult();
-        Map<Enchantment, Integer> toSet = new HashMap<>();
+        event.setResult(mergeResult);
+        ItemMeta meta = mergeResult.getItemMeta();
 
-        boolean ignoreConflicts = false;
-        ItemMeta meta = null;
-        if (result == null && secondItem.getType() == Material.ENCHANTED_BOOK) {
-            result = firstItem.clone();
-            meta = result.getItemMeta();
-            if (inventory.getRenameText() != null && !inventory.getRenameText().isEmpty()) {
-                meta.displayName(Component.text(inventory.getRenameText()));
-            }
-            for (Enchantment bookEnchantment : secondItem.getEnchantments().keySet()) {
-                boolean conflict = false;
-                for (Enchantment itemEnchantment : firstItem.getEnchantments().keySet()) {
-                    if (!bookEnchantment.conflictsWith(itemEnchantment)) {
-                        conflict = true;
-                    }
-                }
-                if (!conflict) {
-                    result.addUnsafeEnchantment(bookEnchantment, 1);
-                }
-            }
+        TreeSet<Integer> levels = new TreeSet<>();
+        if (meta instanceof EnchantmentStorageMeta bookMeta) {
+            levels.addAll(bookMeta.getStoredEnchants().values());
         }
-        if (result == null) {
-            return;
-        }
-        sumEnchants(secondItem, firstItem, result, toSet);
-        sumEnchants(firstItem, secondItem, result, toSet);
-        if (meta == null) {
-            meta = result.getItemMeta();
-        }
-        for (var entry : toSet.entrySet()) {
-            if (entry.getValue() >= 6) {
-                inventory.setRepairCost(39);
-            }
-            meta.addEnchant(entry.getKey(), entry.getValue(), true);
-        }
+        levels.addAll(meta.getEnchants().values());
 
-        result.setItemMeta(meta);
+        int repairCost = Math.abs((levels.last() - 1) * 3);
 
-        inventory.setResult(result);
-        event.getViewers().forEach(player -> ((Player) player).updateInventory());
-        event.setResult(result);
+        if (inventory.getRenameText() != null && !inventory.getRenameText().isEmpty()) {
+            meta.displayName(Component.text(inventory.getRenameText()));
+            repairCost += 1;
+        }
+        mergeResult.setItemMeta(meta);
+
+        inventory.setRepairCost(Math.min(repairCost, 39));
     }
 
-    private void sumEnchants(ItemStack firstItem, ItemStack secondItem, ItemStack result, Map<Enchantment, Integer> toSet) {
-        for (var entry : secondItem.getEnchantments().entrySet()) {
-            if (!firstItem.hasItemMeta() || !result.getItemMeta().hasEnchant(entry.getKey())) {
-                continue;
+    private ItemStack getMergeResult(ItemStack leftItem, ItemStack rightItem) {
+        return switch (getMergeType(leftItem, rightItem)) {
+            case BOOK_ON_BOOK -> mergeEnchantedBooks(leftItem, rightItem);
+            case BOOK_ON_ITEM -> mergeBookAndItem(leftItem, rightItem);
+            case ITEM_ON_ITEM -> mergeEnchantedItems(leftItem, rightItem);
+        };
+    }
+
+    private MergeType getMergeType(ItemStack leftItem, ItemStack rightItem) {
+        if (leftItem.getType() != Material.ENCHANTED_BOOK && rightItem.getType() != Material.ENCHANTED_BOOK)
+            return MergeType.ITEM_ON_ITEM;
+        if (leftItem.getType() == Material.ENCHANTED_BOOK && rightItem.getType() == Material.ENCHANTED_BOOK)
+            return MergeType.BOOK_ON_BOOK;
+        return MergeType.BOOK_ON_ITEM;
+    }
+
+    private ItemStack mergeEnchantedItems(ItemStack leftItem, ItemStack rightItem) {
+        ItemStack resultItem = new ItemStack(leftItem.getType());
+        ItemMeta leftMeta = leftItem.getItemMeta();
+        ItemMeta rightMeta = rightItem.getItemMeta();
+        addLoreToResultItemIfExists(leftMeta, resultItem);
+        addAttributeModifiersToResultItemIfExists(leftMeta, resultItem);
+        leftMeta.getEnchants().forEach((enchant, level) -> {
+            int resultLevel = getResultLevel(level, enchant, rightMeta.getEnchants());
+            resultItem.addUnsafeEnchantment(enchant, resultLevel);
+        });
+        rightMeta.getEnchants().forEach((enchant, level) -> {
+            if (!resultItem.getEnchantments().containsKey(enchant) && !resultItem.getItemMeta().hasConflictingEnchant(enchant)) {
+                resultItem.addUnsafeEnchantment(enchant, level);
             }
-            int level = Math.max(entry.getValue(), result.getEnchantmentLevel(entry.getKey()));
-            toSet.put(entry.getKey(), Math.max(toSet.getOrDefault(entry.getKey(), 0), level));
-            if (firstItem.getEnchantmentLevel(entry.getKey()) == entry.getValue()) {
-                toSet.put(entry.getKey(), Math.max(toSet.getOrDefault(entry.getKey(), 0), entry.getValue() + 1));
+        });
+        return resultItem;
+    }
+
+    private ItemStack mergeBookAndItem(ItemStack item, ItemStack book) {
+        ItemStack resultItem = new ItemStack(item.getType());
+        EnchantmentStorageMeta bookMeta = (EnchantmentStorageMeta) book.getItemMeta();
+        addLoreToResultItemIfExists(item.getItemMeta(), resultItem);
+        addAttributeModifiersToResultItemIfExists(item.getItemMeta(), resultItem);
+        item.getEnchantments().forEach((enchant, level) -> {
+            int resultLevel = getResultLevel(level, enchant, bookMeta.getStoredEnchants());
+            resultItem.addUnsafeEnchantment(enchant, resultLevel);
+        });
+        bookMeta.getStoredEnchants().forEach((enchant, level) -> {
+            if (enchant.canEnchantItem(resultItem) && !resultItem.getEnchantments().containsKey(enchant) && !resultItem.getItemMeta().hasConflictingEnchant(enchant)) {
+                resultItem.addUnsafeEnchantment(enchant, level);
+            }
+        });
+        return resultItem;
+    }
+
+    private ItemStack mergeEnchantedBooks(ItemStack leftBook, ItemStack rightBook) {
+        ItemStack resultItem = new ItemStack(Material.ENCHANTED_BOOK);
+        EnchantmentStorageMeta resultMeta = (EnchantmentStorageMeta) resultItem.getItemMeta();
+        EnchantmentStorageMeta leftMeta = (EnchantmentStorageMeta) leftBook.getItemMeta();
+        EnchantmentStorageMeta rightMeta = (EnchantmentStorageMeta) rightBook.getItemMeta();
+        leftMeta.getStoredEnchants().forEach((enchant, level) -> {
+            int resultLevel = getResultLevel(level, enchant, rightMeta.getStoredEnchants());
+            resultMeta.addStoredEnchant(enchant, resultLevel, true);
+        });
+        rightMeta.getStoredEnchants().forEach((enchant, level) -> {
+            if (!resultMeta.getStoredEnchants().containsKey(enchant) && !resultMeta.hasConflictingStoredEnchant(enchant)) {
+                resultMeta.addStoredEnchant(enchant, level, true);
+            }
+        });
+        resultItem.setItemMeta(resultMeta);
+        return resultItem;
+    }
+
+    private int getResultLevel(int value, Enchantment enchant, Map<Enchantment, Integer> storedEnchants) {
+        int resultLevel = value;
+        if (storedEnchants.containsKey(enchant) && enchant.getMaxLevel() != 1) {
+            int rightLevel = storedEnchants.get(enchant);
+            if (rightLevel == value) {
+                resultLevel++;
+            } else if (rightLevel > value) {
+                resultLevel = rightLevel;
             }
         }
+        int enchantLimitation = BeefUnlimitedEnchants.getInstance().getLimitationForEnchant(enchant.getKey().getKey());
+        return (enchantLimitation == -1) ?
+                resultLevel :
+                Math.min(resultLevel, enchantLimitation);
+    }
+
+    private void addLoreToResultItemIfExists(ItemMeta leftMeta, ItemStack resultItem) {
+        if (!leftMeta.hasLore())
+            return;
+        ItemMeta resultMeta = resultItem.getItemMeta();
+        resultMeta.setLore(leftMeta.getLore());
+        resultItem.setItemMeta(resultMeta);
+    }
+
+    private void addAttributeModifiersToResultItemIfExists(ItemMeta leftMeta, ItemStack resultItem) {
+        if (!leftMeta.hasAttributeModifiers())
+            return;
+        ItemMeta resultMeta = resultItem.getItemMeta();
+        resultMeta.setAttributeModifiers(leftMeta.getAttributeModifiers());
+        resultItem.setItemMeta(resultMeta);
     }
 
 }
