@@ -23,8 +23,9 @@ public class PrepareAnvilHandler implements Listener {
         AnvilInventory inventory = event.getInventory();
         ItemStack leftItem = inventory.getItem(0);
         ItemStack rightItem = inventory.getItem(1);
-        if (leftItem == null || rightItem == null)
+        if (leftItem == null || rightItem == null) {
             return;
+        }
         ItemStack mergeResult = getMergeResult(leftItem, rightItem);
         if (mergeResult == null) {
             event.setResult(null);
@@ -39,7 +40,7 @@ public class PrepareAnvilHandler implements Listener {
         }
         levels.addAll(meta.getEnchants().values());
 
-        int repairCost = Math.abs((levels.last() - 1) * 3);
+        int repairCost = levels.last() * 3;
 
         if (inventory.getRenameText() != null && !inventory.getRenameText().isEmpty()) {
             meta.displayName(Component.text(inventory.getRenameText()));
@@ -55,19 +56,25 @@ public class PrepareAnvilHandler implements Listener {
             case BOOK_ON_BOOK -> mergeEnchantedBooks(leftItem, rightItem);
             case BOOK_ON_ITEM -> mergeBookAndItem(leftItem, rightItem);
             case ITEM_ON_ITEM -> mergeEnchantedItems(leftItem, rightItem);
+            case NONE -> null;
         };
     }
 
     private MergeType getMergeType(ItemStack leftItem, ItemStack rightItem) {
-        if (leftItem.getType() != Material.ENCHANTED_BOOK && rightItem.getType() != Material.ENCHANTED_BOOK)
+        if (leftItem.getType() != Material.ENCHANTED_BOOK && rightItem.getType() != Material.ENCHANTED_BOOK) {
             return MergeType.ITEM_ON_ITEM;
-        if (leftItem.getType() == Material.ENCHANTED_BOOK && rightItem.getType() == Material.ENCHANTED_BOOK)
+        }
+        if (leftItem.getType() == Material.ENCHANTED_BOOK && rightItem.getType() == Material.ENCHANTED_BOOK) {
             return MergeType.BOOK_ON_BOOK;
-        return MergeType.BOOK_ON_ITEM;
+        }
+        if (leftItem.getType() != Material.ENCHANTED_BOOK && rightItem.getType() == Material.ENCHANTED_BOOK) {
+            return MergeType.BOOK_ON_ITEM;
+        }
+        return MergeType.NONE;
     }
 
     private ItemStack mergeEnchantedItems(ItemStack leftItem, ItemStack rightItem) {
-        ItemStack resultItem = new ItemStack(leftItem.getType());
+        ItemStack resultItem = leftItem.clone();
         ItemMeta leftMeta = leftItem.getItemMeta();
         ItemMeta rightMeta = rightItem.getItemMeta();
         addLoreToResultItemIfExists(leftMeta, resultItem);
@@ -85,7 +92,7 @@ public class PrepareAnvilHandler implements Listener {
     }
 
     private ItemStack mergeBookAndItem(ItemStack item, ItemStack book) {
-        ItemStack resultItem = new ItemStack(item.getType());
+        ItemStack resultItem = item.clone();
         EnchantmentStorageMeta bookMeta = (EnchantmentStorageMeta) book.getItemMeta();
         addLoreToResultItemIfExists(item.getItemMeta(), resultItem);
         addAttributeModifiersToResultItemIfExists(item.getItemMeta(), resultItem);
@@ -102,7 +109,7 @@ public class PrepareAnvilHandler implements Listener {
     }
 
     private ItemStack mergeEnchantedBooks(ItemStack leftBook, ItemStack rightBook) {
-        ItemStack resultItem = new ItemStack(Material.ENCHANTED_BOOK);
+        ItemStack resultItem = leftBook.clone();
         EnchantmentStorageMeta resultMeta = (EnchantmentStorageMeta) resultItem.getItemMeta();
         EnchantmentStorageMeta leftMeta = (EnchantmentStorageMeta) leftBook.getItemMeta();
         EnchantmentStorageMeta rightMeta = (EnchantmentStorageMeta) rightBook.getItemMeta();
@@ -136,16 +143,18 @@ public class PrepareAnvilHandler implements Listener {
     }
 
     private void addLoreToResultItemIfExists(ItemMeta leftMeta, ItemStack resultItem) {
-        if (!leftMeta.hasLore())
+        if (!leftMeta.hasLore()) {
             return;
+        }
         ItemMeta resultMeta = resultItem.getItemMeta();
         resultMeta.setLore(leftMeta.getLore());
         resultItem.setItemMeta(resultMeta);
     }
 
     private void addAttributeModifiersToResultItemIfExists(ItemMeta leftMeta, ItemStack resultItem) {
-        if (!leftMeta.hasAttributeModifiers())
+        if (!leftMeta.hasAttributeModifiers()) {
             return;
+        }
         ItemMeta resultMeta = resultItem.getItemMeta();
         resultMeta.setAttributeModifiers(leftMeta.getAttributeModifiers());
         resultItem.setItemMeta(resultMeta);
